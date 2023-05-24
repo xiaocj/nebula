@@ -6,6 +6,7 @@
 
 #include "graph/service/GraphFlags.h"
 #include "graph/util/Utils.h"
+#include <sstream>
 
 using nebula::storage::StorageClient;
 using nebula::storage::StorageRpcResponse;
@@ -13,6 +14,16 @@ using nebula::storage::cpp2::GetNeighborsResponse;
 
 namespace nebula {
 namespace graph {
+
+static std::string vectorToString(const std::vector<Value>& values) {
+  std::stringstream ss;
+  for (auto it= values.begin(); it != values.end(); ++it) {
+    ss << *it << ", ";
+  }
+
+  return ss.str();
+}
+
 
 StatusOr<std::vector<Value>> GetNeighborsExecutor::buildRequestVids() {
   SCOPED_TIMER(&execTime_);
@@ -25,6 +36,9 @@ folly::Future<Status> GetNeighborsExecutor::execute() {
   auto res = buildRequestVids();
   NG_RETURN_IF_ERROR(res);
   auto vids = std::move(res).value();
+  LOG(ERROR) << "execute: name=" << gn_->toString() << ", inputVar=" << node()->inputVar()
+    << ", srcVids=" << vectorToString(vids);
+
   if (vids.empty()) {
     List emptyResult;
     return finish(ResultBuilder()
@@ -95,7 +109,19 @@ Status GetNeighborsExecutor::handleResponse(RpcResponse& resps) {
     list.values.emplace_back(std::move(*dataset));
   }
   builder.value(Value(std::move(list))).iter(Iterator::Kind::kGetNeighbors);
-  return finish(builder.build());
+  Result r = builder.build();
+  auto it = r.iter();
+  std::stringstream ss;
+  for (; it->valid(); it->next()) {
+    auto edgeVal = it->getEdge();
+    auto& edge = edgeVal.getEdge();
+    auto dst = edge.dst;
+    ss << dst << ", ";
+  }
+  LOG(ERROR) << "    done: name=" << gn_->toString() << ", outputVar=" << node()->outputVar()
+    << ", dstVids=" << ss.str();
+
+  return finish(std::move(r));
 }
 
 }  // namespace graph

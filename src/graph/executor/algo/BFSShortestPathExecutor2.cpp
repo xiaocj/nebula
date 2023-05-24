@@ -2,7 +2,7 @@
 //
 // This source code is licensed under Apache 2.0 License.
 
-#include "graph/executor/algo/BFSShortestPathExecutor.h"
+#include "graph/executor/algo/BFSShortestPathExecutor2.h"
 
 #include "graph/planner/plan/Algo.h"
 #include <sstream>
@@ -23,21 +23,16 @@ static std::string hashSetToString(
   return ss.str();
 }
 
-folly::Future<Status> BFSShortestPathExecutor::execute() {
+folly::Future<Status> BFSShortestPathExecutor2::execute() {
   // MemoryTrackerVerified
   SCOPED_TIMER(&execTime_);
   pathNode_ = asNode<BFSShortestPath>(node());
   terminateEarlyVar_ = pathNode_->terminateEarlyVar();
-  LOG(ERROR) << "execute: this=" << this << ", step=" << step_;
+  LOG(ERROR) << "execute2: this=" << this << ", step=" << step_;
   LOG(ERROR) << "    pathNode: id=" << pathNode_->id() << ", steps=" << pathNode_->steps()
-      << ", str=" << pathNode_->toString()
-      << ", ectx=" << ectx_;
+      << ", str=" << pathNode_->toString();
 
-  LOG(ERROR) << "    leftInputVar=" << pathNode_->leftInputVar()
-    << ", rightInputVar=" << pathNode_->rightInputVar()
-    << ", leftVidVar=" << pathNode_->leftVidVar() << ", rightVidVar=" << pathNode_->rightVidVar()
-    << ", outputVar=" << pathNode_->outputVar();
-
+  leftResult_ = std::make_unique<Result>(ectx_->getResult(pathNode_->rightVidVar()).moveCore());
   if (step_ == 1) {
     allRightEdges_.emplace_back();
     auto& currentEdges = allRightEdges_.back();
@@ -54,46 +49,31 @@ folly::Future<Status> BFSShortestPathExecutor::execute() {
     }
   }
 
-  std::vector<folly::Future<Status>> futures;
-  auto leftFuture = folly::via(runner(), [this]() {
-    // MemoryTrackerVerified
+  try {
     memory::MemoryCheckGuard guard;
-    return buildPath(false);
-  });
-  auto rightFuture = folly::via(runner(), [this]() {
-    // MemoryTrackerVerified
-    memory::MemoryCheckGuard guard;
-    return buildPath(true);
-  });
-  futures.emplace_back(std::move(leftFuture));
-  futures.emplace_back(std::move(rightFuture));
 
-  return folly::collect(futures)
-      .via(runner())
-      .thenValue([this](auto&& status) {
-        memory::MemoryCheckGuard guard;
-        UNUSED(status);
-        return conjunctPath();
-      })
-      .thenValue([this](auto&& status) {
-        memory::MemoryCheckGuard guard;
-        UNUSED(status);
-        step_++;
-        DataSet ds;
-        ds.colNames = pathNode_->colNames();
-        ds.rows.swap(currentDs_.rows);
-        return finish(ResultBuilder().value(Value(std::move(ds))).build());
-      })
-      .thenError(
-          folly::tag_t<std::bad_alloc>{},
-          [](const std::bad_alloc&) { return folly::makeFuture<Status>(memoryExceededStatus()); })
-      .thenError(folly::tag_t<std::exception>{}, [](const std::exception& e) {
-        return folly::makeFuture<Status>(std::runtime_error(e.what()));
-      });
+    // build path
+    buildPath(false);
+    buildPath(true);
+
+    // conjunctPath;
+    conjunctPath();
+
+    step_++;
+    DataSet ds;
+    ds.colNames = pathNode_->colNames();
+    ds.rows.swap(currentDs_.rows);
+    Status status = finish(ResultBuilder().value(Value(std::move(ds))).build());
+    return folly::makeFuture<Status>(std::move(status));
+  } catch (const std::bad_alloc&) {
+    return folly::makeFuture<Status>(memoryExceededStatus());
+  } catch (std::exception& e) {
+    return folly::makeFuture<Status>(std::runtime_error(e.what()));
+  }
 }
 
 
-Status BFSShortestPathExecutor::buildPath(bool reverse) {
+Status BFSShortestPathExecutor2::buildPath(bool reverse) {
   LOG(ERROR) << "  buildPath: step=" << step_ << ", reverse=" << reverse;
 
   auto iter = reverse ? ectx_->getResult(pathNode_->rightInputVar()).iter()
@@ -160,7 +140,7 @@ Status BFSShortestPathExecutor::buildPath(bool reverse) {
   return Status::OK();
 }
 
-folly::Future<Status> BFSShortestPathExecutor::conjunctPath() {
+folly::Future<Status> BFSShortestPathExecutor2::conjunctPath() {
   LOG(ERROR) << "  conjunctPath:";
   LOG(ERROR) << "    allLeftEdges:";
   for (size_t n=0; n < allLeftEdges_.size(); ++n) {
@@ -226,7 +206,7 @@ folly::Future<Status> BFSShortestPathExecutor::conjunctPath() {
   });
 }
 
-DataSet BFSShortestPathExecutor::doConjunct(const std::vector<Value>& meetVids,
+DataSet BFSShortestPathExecutor2::doConjunct(const std::vector<Value>& meetVids,
                                             bool oddStep) const {
   DataSet ds;
   auto leftPaths = createPath(meetVids, false, oddStep);
@@ -245,7 +225,7 @@ DataSet BFSShortestPathExecutor::doConjunct(const std::vector<Value>& meetVids,
   return ds;
 }
 
-std::unordered_multimap<Value, Path> BFSShortestPathExecutor::createPath(
+std::unordered_multimap<Value, Path> BFSShortestPathExecutor2::createPath(
     std::vector<Value> meetVids, bool reverse, bool oddStep) const {
   std::unordered_multimap<Value, Path> result;
   auto& allEdges = reverse ? allRightEdges_ : allLeftEdges_;

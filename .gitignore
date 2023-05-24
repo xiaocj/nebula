@@ -5,6 +5,8 @@
 # build
 pkg-build
 build
+build2/
+test/
 _build
 _build.log
 _install

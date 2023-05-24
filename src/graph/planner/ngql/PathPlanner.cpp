@@ -255,7 +255,7 @@ Expression* PathPlanner::singlePairLoopCondition(uint32_t steps,
   pathCtx_->qctx->ectx()->setValue(loopSteps, 0);
   auto* pool = pathCtx_->qctx->objPool();
 
-  auto step = ExpressionUtils::stepCondition(pool, loopSteps, ((steps + 1) / 2));
+  auto step = ExpressionUtils::stepCondition(pool, loopSteps, (steps));
   auto empty = ExpressionUtils::equalCondition(pool, pathVar, Value::kEmpty);
   auto zero = ExpressionUtils::zeroCondition(pool, pathVar);
   auto loopTerminateEarly = ExpressionUtils::equalCondition(pool, terminateEarlyVar, false);

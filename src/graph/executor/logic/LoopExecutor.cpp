@@ -17,10 +17,14 @@ folly::Future<Status> LoopExecutor::execute() {
 
   auto *loopNode = asNode<Loop>(node());
   Expression *expr = loopNode->condition();
-  QueryExpressionContext ctx(ectx_);
+  LOG(ERROR) << "execute: name=" << name() << "_" << id() << ", expr=" << expr->toString();
 
+  QueryExpressionContext ctx(ectx_);
   auto value = expr->eval(ctx);
   DCHECK(value.isBool());
+
+  LOG(ERROR) << "  value=" << value.getBool();
+
   finally_ = !(value.isBool() && value.getBool());
   return finish(ResultBuilder().value(std::move(value)).iter(Iterator::Kind::kDefault).build());
 }

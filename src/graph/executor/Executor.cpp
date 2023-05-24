@@ -45,7 +45,7 @@
 #include "graph/executor/admin/SwitchSpaceExecutor.h"
 #include "graph/executor/admin/UpdateUserExecutor.h"
 #include "graph/executor/admin/ZoneExecutor.h"
-#include "graph/executor/algo/BFSShortestPathExecutor.h"
+#include "graph/executor/algo/BFSShortestPathExecutor2.h"
 #include "graph/executor/algo/CartesianProductExecutor.h"
 #include "graph/executor/algo/MultiShortestPathExecutor.h"
 #include "graph/executor/algo/ProduceAllPathsExecutor.h"
@@ -452,7 +452,7 @@ Executor *Executor::makeExecutor(QueryContext *qctx, const PlanNode *node) {
       return pool->makeAndAdd<ShowCollationExecutor>(node, qctx);
     }
     case PlanNode::Kind::kBFSShortest: {
-      return pool->makeAndAdd<BFSShortestPathExecutor>(node, qctx);
+      return pool->makeAndAdd<BFSShortestPathExecutor2>(node, qctx);
     }
     case PlanNode::Kind::kMultiShortestPath: {
       return pool->makeAndAdd<MultiShortestPathExecutor>(node, qctx);

@@ -43,7 +43,7 @@ nebula_add_library(
     query/RollUpApplyExecutor.cpp
     query/PatternApplyExecutor.cpp
     query/GetDstBySrcExecutor.cpp
-    algo/BFSShortestPathExecutor.cpp
+    algo/BFSShortestPathExecutor2.cpp
     algo/MultiShortestPathExecutor.cpp
     algo/ProduceAllPathsExecutor.cpp
     algo/ShortestPathExecutor.cpp

@@ -104,9 +104,12 @@ class Result final {
     std::unique_ptr<Iterator> iter;
   };
 
+  Core core_;
+
+public:
   explicit Result(Core&& core) : core_(std::move(core)) {}
 
-  Core core_;
+  Core&& moveCore() { return std::move(core_); }
 };
 
 // Default iterator type is sequential.
