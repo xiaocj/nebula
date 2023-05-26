@@ -109,7 +109,7 @@ class Result final {
 public:
   explicit Result(Core&& core) : core_(std::move(core)) {}
 
-  Core&& moveCore() { return std::move(core_); }
+  Result clone() const;
 };
 
 // Default iterator type is sequential.

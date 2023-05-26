@@ -36,5 +36,10 @@ ResultBuilder& ResultBuilder::iter(Iterator::Kind kind) {
   }
 }
 
+Result Result::clone() const {
+  Core c(core_);
+  return Result(std::move(c));
+}
+
 }  // namespace graph
 }  // namespace nebula

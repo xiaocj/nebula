@@ -43,39 +43,71 @@ namespace nebula {
 namespace graph {
 class BFSShortestPath;
 class BFSShortestPathExecutor2 final : public Executor {
+ private:
+  class LevelData {
+  public:
+    explicit LevelData(int depth): depth_(depth) {}
+    explicit LevelData(int depth, const Edge&& edge): depth_(depth) { edges_.emplace_back(edge); }
+
+    const int depth_;
+    std::vector<Edge> edges_;
+  };
+
+  class DirectionData {
+  public:
+    DirectionData();
+
+    bool valid() const;
+    bool canGoDeeper() const;
+
+    bool getQueryResult(const ExecutionContext *ectx, const std::string& key);
+    void setNextQueryVids(ExecutionContext *ectx, const std::string& key);
+    void resetNextQueryVids(ExecutionContext *ectx, const std::string& key);
+
+    bool query_{true};
+    Result inputs_;
+
+    int currentDepth_{0};
+    std::unordered_map<Value, LevelData> visitedVids_;
+    DataSet nextStepVids_;
+    bool haveFoundSomething_;
+
+    bool stop_{false};
+    bool finishCurrentLayerThenStop_{false};
+  };
+
  public:
   using HashSet = robin_hood::unordered_flat_set<Value, std::hash<Value>>;
-  BFSShortestPathExecutor2(const PlanNode* node, QueryContext* qctx)
-      : Executor("BFSShortestPath2", node, qctx) {}
+  BFSShortestPathExecutor2(const PlanNode* node, QueryContext* qctx);
+//      : Executor("BFSShortestPath2", node, qctx) {}
 
   folly::Future<Status> execute() override;
 
  private:
-  Status buildPath(bool reverse);
-
-  folly::Future<Status> conjunctPath();
+  Status goOneStep(DirectionData& sideA, DirectionData& sideB, bool reverse, HashSet& meetVids);
+  bool tryMeet(DirectionData& sideA, DirectionData& sideB, const Value& dst, HashSet& meetVids);
 
   DataSet doConjunct(const std::vector<Value>& meetVids, bool oddStep) const;
 
-  std::unordered_multimap<Value, Path> createPath(std::vector<Value> meetVids,
-                                                  bool reverse,
-                                                  bool oddStep) const;
+  DataSet doConjunct(const HashSet& meetVids) const;
+  std::vector<Path> createFullPaths(const Value& vid) const;
+  std::vector<Path> createPartialPaths(const DirectionData& side, const Value& vid) const;
 
  private:
   const BFSShortestPath* pathNode_{nullptr};
   size_t step_{1};
 
-  // left results
-  std::unique_ptr<Result> leftResult_;
-  std::unique_ptr<Result> rightResult_;
+  // cache data shared for both sides
+  int sharedCurrentDepth_{0};
+  int sharedFrozenDepth_{0};
 
-  HashSet leftVisitedVids_;
-  HashSet rightVisitedVids_;
-  std::vector<std::unordered_multimap<Value, Edge>> allLeftEdges_;
-  std::vector<std::unordered_multimap<Value, Edge>> allRightEdges_;
-  DataSet currentDs_;
+  // cache data for each side
+  DirectionData left_;
+  DirectionData right_;
+
   std::string terminateEarlyVar_;
 };
+
 }  // namespace graph
 }  // namespace nebula
 #endif  // GRAPH_EXECUTOR_ALGO_BFSSHORTESTPATHEXECUTOR_H_
