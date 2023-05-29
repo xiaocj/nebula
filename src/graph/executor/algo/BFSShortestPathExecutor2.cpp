@@ -12,32 +12,27 @@ DECLARE_int32(num_operator_threads);
 namespace nebula {
 namespace graph {
 
+// static std::string resultsToString(const Result& inputs) {
+//     std::stringstream ss;
+//     for (auto it= inputs.iter(); it->valid(); it->next()) {
+//         auto edgeVal = it->getEdge();
+//         if (UNLIKELY(!edgeVal.isEdge())) {
+//           continue;
+//         }
+//         ss << edgeVal.getEdge().dst << ",";
+//     }
 
-// static std::string hashSetToString(
-//   const robin_hood::unordered_flat_set<Value, std::hash<Value>>& hashSet) {
-//   std::stringstream ss;
-//   for (auto it= hashSet.begin(); it != hashSet.end(); ++it) {
-//     ss << *it << ", ";
-//   }
-
-//   return ss.str();
+//     return ss.str();
 // }
 
-static std::string resultsToString(const Result& inputs) {
-    std::stringstream ss;
-    for (auto it= inputs.iter(); it->valid(); it->next()) {
-        auto edgeVal = it->getEdge();
-        if (UNLIKELY(!edgeVal.isEdge())) {
-          continue;
-        }
-        ss << edgeVal.getEdge().dst << ", ";
-    }
+const std::string BFSShortestPathExecutor2::LevelData::toString() const {
+  std::stringstream ss;
+  ss << "depth=" << depth_ << ", edges=";
+  for (const auto& e : edges_) {
+    ss << e << ",";
+  }
 
-    return ss.str();
-}
-
-BFSShortestPathExecutor2::DirectionData::DirectionData()
-  : inputs_(Result::EmptyResult().clone()) {
+  return ss.str();
 }
 
 bool BFSShortestPathExecutor2::DirectionData::valid() const {
@@ -48,34 +43,49 @@ bool BFSShortestPathExecutor2::DirectionData::canGoDeeper() const {
   return !stop_ && !finishCurrentLayerThenStop_ && !nextStepVids_.rows.empty();
 }
 
-bool BFSShortestPathExecutor2::DirectionData::getQueryResult(const ExecutionContext *ectx,
-                                                             const std::string& key) {
-  if (query_) {
-    inputs_ = ectx->getResult(key).clone();
-    currentDepth_++;
-  }
-  return query_;
-}
+std::string BFSShortestPathExecutor2::DirectionData::toString() const {
+  std::stringstream ss;
+  ss << "currentDepth=" << currentDepth_ << ", haveFoundSomething=" << haveFoundSomething_
+    << "stop=" << stop_ << ", finishCurrentLayerThenStop" << finishCurrentLayerThenStop_
+    << ", visitedVids=" << visitedVids_.size() << ", nextStepVids=" << nextStepVids_.size();
 
-void BFSShortestPathExecutor2::DirectionData::setNextQueryVids(ExecutionContext *ectx,
-                                                               const std::string& key) {
-    DataSet nextStepVids(std::move(nextStepVids_));
-    nextStepVids.colNames = {nebula::kVid};
-    ectx->setResult(key, ResultBuilder().value(std::move(nextStepVids)).build());
-    query_ = true;
-}
-
-void BFSShortestPathExecutor2::DirectionData::resetNextQueryVids(ExecutionContext *ectx,
-                                                                 const std::string& key) {
-    DataSet nextStepVids;
-    nextStepVids.colNames = {nebula::kVid};
-    ectx->setResult(key, ResultBuilder().value(std::move(nextStepVids)).build());
-    query_ = false;
+  return ss.str();
 }
 
 BFSShortestPathExecutor2::BFSShortestPathExecutor2(const PlanNode* node, QueryContext* qctx)
   : Executor("BFSShortestPath2", node, qctx) {
 }
+
+bool BFSShortestPathExecutor2::getQueryResult(bool reverse) {
+  const std::string& vidVar = reverse ? pathNode_->rightVidVar() : pathNode_->leftVidVar();
+  const std::string& inputVar = reverse ? pathNode_->rightInputVar() : pathNode_->leftInputVar();
+  DirectionData& side = reverse? right_ : left_;
+
+  const auto& vids = ectx_->getResult(vidVar);
+  if (vids.iter()->valid()) {
+    side.inputs_ = ectx_->getResult(inputVar).clone();
+    side.currentDepth_++;
+    sharedCurrentDepth_++;
+
+    // reset query
+    DataSet nextStepVids;
+    nextStepVids.colNames = {nebula::kVid};
+    ectx_->setResult(vidVar, ResultBuilder().value(std::move(nextStepVids)).build());
+    return true;
+  } else {
+    return false;
+  }
+}
+
+void BFSShortestPathExecutor2::setNextQueryVids(bool reverse) {
+  const std::string& vidVar = reverse ? pathNode_->rightVidVar() : pathNode_->leftVidVar();
+  DirectionData& side = reverse? right_ : left_;
+
+  DataSet nextStepVids(std::move(side.nextStepVids_));
+  nextStepVids.colNames = {nebula::kVid};
+  ectx_->setResult(vidVar, ResultBuilder().value(std::move(nextStepVids)).build());
+}
+
 
 folly::Future<Status> BFSShortestPathExecutor2::execute() {
   // MemoryTrackerVerified
@@ -96,32 +106,34 @@ folly::Future<Status> BFSShortestPathExecutor2::execute() {
       right_.visitedVids_.emplace(vid, LevelData(0));
     }
 
-    // check
+    // check whether starts contains ends
+    std::vector<Path> paths;
     for (auto left=left_.visitedVids_.begin(); left != left_.visitedVids_.end(); ++left) {
       auto right = right_.visitedVids_.find(left->first);
       if (right != right_.visitedVids_.end()) {
-        DataSet ds;  // TODO: empty path
-        ds.colNames = pathNode_->colNames();
-        Status status = finish(ResultBuilder().value(Value(std::move(ds))).build());
-        ectx_->setValue(terminateEarlyVar_, true);
-        return folly::makeFuture<Status>(std::move(status);
+        Path p;
+        p.src = Vertex(left->first, {});
+        paths.emplace_back(p);
       }
+    }
+    if (!paths.empty()) {
+      DataSet ds;
+      ds.colNames = pathNode_->colNames();
+      for (auto& p : paths) {
+        Row row;
+        row.emplace_back(std::move(p));
+        ds.rows.emplace_back(std::move(row));
+      }
+
+      Status status = finish(ResultBuilder().value(Value(std::move(ds))).build());
+      ectx_->setValue(terminateEarlyVar_, true);
+      return folly::makeFuture<Status>(std::move(status));
     }
   }
 
   // read query results
-  if (left_.getQueryResult(ectx_, pathNode_->leftInputVar())) {
-    left_.resetNextQueryVids(ectx_, pathNode_->leftVidVar());
-    sharedCurrentDepth_++;
-    LOG(ERROR) << "    left: depth=" << left_.currentDepth_ << "/"
-      << sharedCurrentDepth_ << ", vids=" << resultsToString(left_.inputs_);
-  }
-  if (right_.getQueryResult(ectx_, pathNode_->rightInputVar())) {
-    right_.resetNextQueryVids(ectx_, pathNode_->rightVidVar());
-    sharedCurrentDepth_++;
-    LOG(ERROR) << "    right_: depth=" << right_.currentDepth_ << "/"
-      << sharedCurrentDepth_ << ", vids=" << resultsToString(right_.inputs_);
-  }
+  getQueryResult(false);
+  getQueryResult(true);
 
   try {
     memory::MemoryCheckGuard guard;
@@ -133,21 +145,19 @@ folly::Future<Status> BFSShortestPathExecutor2::execute() {
     }
 
     // try load next layer vertexes
-    LOG(ERROR) << "    sharedFrozenDepth_=" << sharedFrozenDepth_
-      << ", sharedCurrentDepth_=" << sharedCurrentDepth_
-      << ", pathNode_->steps()=" << pathNode_->steps()
-      << ", meetVids.empty()=" << meetVids.empty();
-
-    if (meetVids.empty() && sharedFrozenDepth_ == 0 &&
+    if (meetVids.empty() && sharedFrozenDepth_ <= 0 &&
         sharedCurrentDepth_ < static_cast<int>(pathNode_->steps())) {
+      bool goDeeper = false;
       if (!left_.valid() && left_.canGoDeeper()) {
-        left_.setNextQueryVids(ectx_, pathNode_->leftVidVar());
+        setNextQueryVids(false);
+        goDeeper = true;
       }
       if (!right_.valid() && right_.canGoDeeper()) {
-        right_.setNextQueryVids(ectx_, pathNode_->rightVidVar());
+        setNextQueryVids(true);
+        goDeeper = true;
       }
 
-      if (left_.query_ || right_.query_) {
+      if (goDeeper) {
         step_++;
         return folly::makeFuture<Status>(Status::OK());
       }
@@ -163,7 +173,6 @@ folly::Future<Status> BFSShortestPathExecutor2::execute() {
 
     LOG(ERROR) << "    BOTH LEFT AND RIGHT are finished";
     ectx_->setValue(terminateEarlyVar_, true);
-
     step_++;
     DataSet ds = doConjunct(meetVids);
     ds.colNames = pathNode_->colNames();
@@ -180,12 +189,21 @@ Status BFSShortestPathExecutor2::goOneStep(DirectionData& thisSide,
                                            DirectionData& otherSide,
                                            bool reverse,
                                            HashSet& meetVids) {
+  // LOG(ERROR) << "    sharedFrozenDepth_=" << sharedFrozenDepth_
+  //   << ", sharedCurrentDepth_=" << sharedCurrentDepth_
+  //   << ", thisSide.haveFoundSomething_=" << thisSide.haveFoundSomething_;
+  if (sharedFrozenDepth_ > 0 && !thisSide.haveFoundSomething_ &&
+      sharedCurrentDepth_ >  sharedFrozenDepth_) {
+    thisSide.stop_ = true;
+    return Status::OK();
+  }
+
   Iterator* iter = thisSide.inputs_.iterRef();
   while (iter->valid()) {
     auto edgeVal = iter->getEdge();
     iter->next();
     if (UNLIKELY(!edgeVal.isEdge())) {
-      return Status::OK();
+      continue;
     }
 
     auto& edge = edgeVal.getEdge();
@@ -193,16 +211,14 @@ Status BFSShortestPathExecutor2::goOneStep(DirectionData& thisSide,
 
     auto it = thisSide.visitedVids_.find(dst);
     if (it == thisSide.visitedVids_.end()) {
-      LOG(ERROR) << "      new node: reverse=" << reverse << ", dst=" << dst << ", edge=" << edge;
+      LOG(INFO) << "      new: reverse=" << reverse << ", dst=" << dst
+                << ", depth=" << thisSide.currentDepth_;
       thisSide.nextStepVids_.rows.emplace_back(Row({dst}));
       thisSide.visitedVids_.emplace(dst, LevelData(thisSide.currentDepth_, std::move(edge)));
       tryMeet(thisSide, otherSide, dst, meetVids);
       break;
     } else if (it->second.depth_ == thisSide.currentDepth_) {
-      LOG(ERROR) << "      update node: reverse=" << reverse << ", dst=" << dst;
       it->second.edges_.emplace_back(std::move(edge));
-    } else {
-      LOG(ERROR) << "      discard node: reverse=" << reverse << ", dst=" << dst;
     }
   }
 
@@ -223,10 +239,16 @@ bool BFSShortestPathExecutor2::tryMeet(DirectionData& thisSide,
     if (depth <= sharedFrozenDepth_)  {
       thisSide.haveFoundSomething_ = true;
       if (depth < sharedFrozenDepth_)  {
+          // LOG(ERROR) << "    sharedFrozenDepth_=" << sharedFrozenDepth_ << ", depth=" << depth
+          //   << ", thisSide.haveFoundSomething_=" << thisSide.haveFoundSomething_;
+          // LOG(ERROR) << "       === other side STOP!";
+
+          meetVids.clear();
           sharedFrozenDepth_ = depth;
           otherSide.stop_ = true;
       }
 
+      LOG(INFO) << "      MEET!!, dst=" << dst << ", sharedFrozenDepth_=" << sharedFrozenDepth_;
       meetVids.emplace(dst);
     }
 
@@ -237,9 +259,25 @@ bool BFSShortestPathExecutor2::tryMeet(DirectionData& thisSide,
 }
 
 DataSet BFSShortestPathExecutor2::doConjunct(const HashSet& meetVids) const {
+  // LOG(ERROR) << "left visited:";
+  // for(auto it = left_.visitedVids_.begin(); it != left_.visitedVids_.end(); ++it) {
+  //   LOG(ERROR) << "      vid=" << it->first << ", data=" << it->second.toString();
+  // }
+  // LOG(ERROR) << "right visited:";
+  // for(auto it = right_.visitedVids_.begin(); it != right_.visitedVids_.end(); ++it) {
+  //   LOG(ERROR) << "      vid=" << it->first << ", data=" << it->second.toString();
+  // }
+
+  LOG(INFO) << "meets:";
+  for (auto& vid : meetVids) {
+    LOG(INFO) << "      vid=" << vid;
+  }
+
   DataSet ds;
   for (auto& vid : meetVids) {
     std::vector<Path> paths = createFullPaths(vid);
+    LOG(INFO) << "   paths:" << paths.size();
+
     for (auto& p : paths) {
       Row row;
       row.emplace_back(std::move(p));
@@ -252,13 +290,18 @@ DataSet BFSShortestPathExecutor2::doConjunct(const HashSet& meetVids) const {
 std::vector<Path> BFSShortestPathExecutor2::createFullPaths(const Value& vid) const {
   std::vector<Path> paths;
 
+  LOG(INFO) << "   CREATE LEFT PARTIALPATH";
   std::vector<Path> leftPaths = createPartialPaths(left_, vid);
+  LOG(INFO) << "   CREATE RIGHT PARTIALPATH";
   std::vector<Path> rightPaths = createPartialPaths(right_, vid);
+  LOG(INFO) << "   CREATE ALL PARTIALPATH";
+
   for (auto leftIt = leftPaths.begin(); leftIt != leftPaths.end(); ++leftIt) {
     leftIt->reverse();
     Path p = *leftIt;  // TODO: optimize
     for (auto rightIt = rightPaths.begin(); rightIt != rightPaths.end(); ++rightIt) {
       p.append(*rightIt);
+      paths.emplace_back(p);
     }
   }
 
@@ -272,28 +315,37 @@ std::vector<Path> BFSShortestPathExecutor2::createPartialPaths(const DirectionDa
   // find start vertex
   auto topIt = side.visitedVids_.find(vid);
   if (topIt == side.visitedVids_.end()) {
-    LOG(ERROR) << "      Hit vid not found, vid=" << vid;
+    LOG(INFO) << "      Hit vid not found, vid=" << vid;
     return result;
   }
   if (topIt->second.depth_ == 0) {
+    Path p;
+    p.src.vid = vid;
+    result.emplace_back(std::move(p));
     return result;
   }
 
   // create start paths
-  for (auto eIt = topIt->second.edges_.begin(); eIt != topIt->second.edges_.end(); ++topIt) {
+  for (auto eIt = topIt->second.edges_.begin(); eIt != topIt->second.edges_.end(); ++eIt) {
       Path p;
       p.src.vid = vid;
       p.steps.emplace_back(Step(Vertex(eIt->src, {}), -eIt->type, eIt->name, eIt->ranking, {}));
       result.emplace_back(std::move(p));
   }
 
-  std::vector<Path> interimPaths = std::move(result);
-  for (int depth = topIt->second.depth_-1; depth >= 0; --depth) {
+  for (int depth = topIt->second.depth_-1; depth > 0; --depth) {
+    std::vector<Path> interimPaths = std::move(result);
+
+    LOG(ERROR) << "    LOOP, depth=" << depth << ", interimPaths.size=" << interimPaths.size();
+    for (auto& p : interimPaths) {
+      LOG(ERROR) << "       path=" <<p;
+    }
+
     for (auto pathIt = interimPaths.begin(); pathIt != interimPaths.end(); ++pathIt) {
-      auto& nextVid = pathIt->steps.back().dst;
+      auto& nextVid = pathIt->steps.back().dst.vid;
       auto it = side.visitedVids_.find(nextVid);
       if (it == side.visitedVids_.end()) {
-        LOG(ERROR) << "      Hit vid not found, nextVid=" << nextVid;
+        LOG(ERROR) << "       path=" << *pathIt << ", Hit vid not found, nextVid=" << nextVid;
         continue;
       }
 
@@ -301,14 +353,17 @@ std::vector<Path> BFSShortestPathExecutor2::createPartialPaths(const DirectionDa
         LOG(ERROR) << "      depth mismatch=" << it->second.depth_ << ", " << depth;
       }
 
-      for (auto eIt = it->second.edges_.begin(); eIt != it->second.edges_.end(); ++it) {
+      for (auto eIt = it->second.edges_.begin(); eIt != it->second.edges_.end(); ++eIt) {
         Path p = *pathIt;
         p.steps.emplace_back(Step(Vertex(eIt->src, {}), -eIt->type, eIt->name, eIt->ranking, {}));
         result.emplace_back(std::move(p));
       }
     }
 
-    interimPaths = std::move(result);
+    LOG(ERROR) << "    LOOP done, result=" << result.size();
+    for (auto& p : result) {
+      LOG(ERROR) << "       path=" <<p;
+    }
   }
 
   return result;

@@ -22,8 +22,8 @@ folly::Future<Status> LoopExecutor::execute() {
   auto value = expr->eval(ctx);
   DCHECK(value.isBool());
 
-  LOG(ERROR) << "execute: name=" << name() << "_" << id() << ", value=" << value.getBool()
-    << ", expr=" << expr->toString();
+  // LOG(ERROR) << "execute: name=" << name() << "_" << id() << ", value=" << value.getBool()
+  //   << ", expr=" << expr->toString();
 
   finally_ = !(value.isBool() && value.getBool());
   return finish(ResultBuilder().value(std::move(value)).iter(Iterator::Kind::kDefault).build());

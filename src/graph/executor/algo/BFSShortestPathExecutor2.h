@@ -48,6 +48,7 @@ class BFSShortestPathExecutor2 final : public Executor {
   public:
     explicit LevelData(int depth): depth_(depth) {}
     explicit LevelData(int depth, const Edge&& edge): depth_(depth) { edges_.emplace_back(edge); }
+    const std::string toString() const;
 
     const int depth_;
     std::vector<Edge> edges_;
@@ -55,22 +56,18 @@ class BFSShortestPathExecutor2 final : public Executor {
 
   class DirectionData {
   public:
-    DirectionData();
+    DirectionData() : inputs_(Result::EmptyResult().clone()) {}
 
     bool valid() const;
     bool canGoDeeper() const;
+    std::string toString() const;
 
-    bool getQueryResult(const ExecutionContext *ectx, const std::string& key);
-    void setNextQueryVids(ExecutionContext *ectx, const std::string& key);
-    void resetNextQueryVids(ExecutionContext *ectx, const std::string& key);
-
-    bool query_{true};
     Result inputs_;
 
     int currentDepth_{0};
+    bool haveFoundSomething_{false};
     std::unordered_map<Value, LevelData> visitedVids_;
     DataSet nextStepVids_;
-    bool haveFoundSomething_;
 
     bool stop_{false};
     bool finishCurrentLayerThenStop_{false};
@@ -92,6 +89,9 @@ class BFSShortestPathExecutor2 final : public Executor {
   DataSet doConjunct(const HashSet& meetVids) const;
   std::vector<Path> createFullPaths(const Value& vid) const;
   std::vector<Path> createPartialPaths(const DirectionData& side, const Value& vid) const;
+
+  bool getQueryResult(bool reverse);
+  void setNextQueryVids(bool reverse);
 
  private:
   const BFSShortestPath* pathNode_{nullptr};
