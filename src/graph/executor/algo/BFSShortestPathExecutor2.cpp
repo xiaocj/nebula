@@ -111,9 +111,7 @@ folly::Future<Status> BFSShortestPathExecutor2::execute() {
     for (auto left=left_.visitedVids_.begin(); left != left_.visitedVids_.end(); ++left) {
       auto right = right_.visitedVids_.find(left->first);
       if (right != right_.visitedVids_.end()) {
-        Path p;
-        p.src = Vertex(left->first, {});
-        paths.emplace_back(p);
+        paths.emplace_back(Path(Vertex(left->first, {}), std::vector<Step>()));
       }
     }
     if (!paths.empty()) {
@@ -140,8 +138,8 @@ folly::Future<Status> BFSShortestPathExecutor2::execute() {
 
     HashSet meetVids;
     while (left_.valid() && right_.valid()) {
-      goOneStep(left_, right_, false, meetVids);
-      goOneStep(right_, left_, true, meetVids);
+      goOneStep(left_, right_, meetVids);
+      goOneStep(right_, left_, meetVids);
     }
 
     // try load next layer vertexes
@@ -165,10 +163,10 @@ folly::Future<Status> BFSShortestPathExecutor2::execute() {
 
     // process the left nodes
     while (left_.valid()) {
-      goOneStep(left_, right_, false, meetVids);
+      goOneStep(left_, right_, meetVids);
     }
     while (right_.valid()) {
-      goOneStep(right_, left_, true, meetVids);
+      goOneStep(right_, left_, meetVids);
     }
 
     LOG(ERROR) << "    BOTH LEFT AND RIGHT are finished";
@@ -187,7 +185,6 @@ folly::Future<Status> BFSShortestPathExecutor2::execute() {
 
 Status BFSShortestPathExecutor2::goOneStep(DirectionData& thisSide,
                                            DirectionData& otherSide,
-                                           bool reverse,
                                            HashSet& meetVids) {
   // LOG(ERROR) << "    sharedFrozenDepth_=" << sharedFrozenDepth_
   //   << ", sharedCurrentDepth_=" << sharedCurrentDepth_
@@ -211,8 +208,8 @@ Status BFSShortestPathExecutor2::goOneStep(DirectionData& thisSide,
 
     auto it = thisSide.visitedVids_.find(dst);
     if (it == thisSide.visitedVids_.end()) {
-      LOG(INFO) << "      new: reverse=" << reverse << ", dst=" << dst
-                << ", depth=" << thisSide.currentDepth_;
+      // LOG(INFO) << "      new: reverse=" << reverse << ", dst=" << dst
+      //           << ", depth=" << thisSide.currentDepth_;
       thisSide.nextStepVids_.rows.emplace_back(Row({dst}));
       thisSide.visitedVids_.emplace(dst, LevelData(thisSide.currentDepth_, std::move(edge)));
       tryMeet(thisSide, otherSide, dst, meetVids);
@@ -248,7 +245,7 @@ bool BFSShortestPathExecutor2::tryMeet(DirectionData& thisSide,
           otherSide.stop_ = true;
       }
 
-      LOG(INFO) << "      MEET!!, dst=" << dst << ", sharedFrozenDepth_=" << sharedFrozenDepth_;
+      // LOG(INFO) << "      MEET!!, dst=" << dst << ", sharedFrozenDepth_=" << sharedFrozenDepth_;
       meetVids.emplace(dst);
     }
 
@@ -268,15 +265,15 @@ DataSet BFSShortestPathExecutor2::doConjunct(const HashSet& meetVids) const {
   //   LOG(ERROR) << "      vid=" << it->first << ", data=" << it->second.toString();
   // }
 
-  LOG(INFO) << "meets:";
-  for (auto& vid : meetVids) {
-    LOG(INFO) << "      vid=" << vid;
-  }
+  // LOG(INFO) << "meets:";
+  // for (auto& vid : meetVids) {
+  //   LOG(INFO) << "      vid=" << vid;
+  // }
 
   DataSet ds;
   for (auto& vid : meetVids) {
     std::vector<Path> paths = createFullPaths(vid);
-    LOG(INFO) << "   paths:" << paths.size();
+    // LOG(INFO) << "   paths:" << paths.size();
 
     for (auto& p : paths) {
       Row row;
@@ -290,12 +287,8 @@ DataSet BFSShortestPathExecutor2::doConjunct(const HashSet& meetVids) const {
 std::vector<Path> BFSShortestPathExecutor2::createFullPaths(const Value& vid) const {
   std::vector<Path> paths;
 
-  LOG(INFO) << "   CREATE LEFT PARTIALPATH";
   std::vector<Path> leftPaths = createPartialPaths(left_, vid);
-  LOG(INFO) << "   CREATE RIGHT PARTIALPATH";
   std::vector<Path> rightPaths = createPartialPaths(right_, vid);
-  LOG(INFO) << "   CREATE ALL PARTIALPATH";
-
   for (auto leftIt = leftPaths.begin(); leftIt != leftPaths.end(); ++leftIt) {
     leftIt->reverse();
     Path p = *leftIt;  // TODO: optimize
@@ -315,7 +308,7 @@ std::vector<Path> BFSShortestPathExecutor2::createPartialPaths(const DirectionDa
   // find start vertex
   auto topIt = side.visitedVids_.find(vid);
   if (topIt == side.visitedVids_.end()) {
-    LOG(INFO) << "      Hit vid not found, vid=" << vid;
+    LOG(ERROR) << "      Hit vid not found, vid=" << vid;
     return result;
   }
   if (topIt->second.depth_ == 0) {
@@ -336,10 +329,10 @@ std::vector<Path> BFSShortestPathExecutor2::createPartialPaths(const DirectionDa
   for (int depth = topIt->second.depth_-1; depth > 0; --depth) {
     std::vector<Path> interimPaths = std::move(result);
 
-    LOG(ERROR) << "    LOOP, depth=" << depth << ", interimPaths.size=" << interimPaths.size();
-    for (auto& p : interimPaths) {
-      LOG(ERROR) << "       path=" <<p;
-    }
+    // LOG(ERROR) << "    LOOP, depth=" << depth << ", interimPaths.size=" << interimPaths.size();
+    // for (auto& p : interimPaths) {
+    //   LOG(ERROR) << "       path=" <<p;
+    // }
 
     for (auto pathIt = interimPaths.begin(); pathIt != interimPaths.end(); ++pathIt) {
       auto& nextVid = pathIt->steps.back().dst.vid;
@@ -358,11 +351,6 @@ std::vector<Path> BFSShortestPathExecutor2::createPartialPaths(const DirectionDa
         p.steps.emplace_back(Step(Vertex(eIt->src, {}), -eIt->type, eIt->name, eIt->ranking, {}));
         result.emplace_back(std::move(p));
       }
-    }
-
-    LOG(ERROR) << "    LOOP done, result=" << result.size();
-    for (auto& p : result) {
-      LOG(ERROR) << "       path=" <<p;
     }
   }
 

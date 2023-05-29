@@ -15,17 +15,17 @@ using nebula::storage::cpp2::GetNeighborsResponse;
 namespace nebula {
 namespace graph {
 
-static std::string vectorToString(const std::vector<Value>& values) {
-  std::stringstream ss;
-  for (auto it= values.begin(); it != values.end(); ++it) {
-    if (it != values.begin()) {
-      ss << ",";
-    }
-    ss << *it;
-  }
+// static std::string vectorToString(const std::vector<Value>& values) {
+//   std::stringstream ss;
+//   for (auto it= values.begin(); it != values.end(); ++it) {
+//     if (it != values.begin()) {
+//       ss << ",";
+//     }
+//     ss << *it;
+//   }
 
-  return ss.str();
-}
+//   return ss.str();
+// }
 
 StatusOr<std::vector<Value>> GetNeighborsExecutor::buildRequestVids() {
   SCOPED_TIMER(&execTime_);
@@ -111,15 +111,15 @@ Status GetNeighborsExecutor::handleResponse(RpcResponse& resps) {
   builder.value(Value(std::move(list))).iter(Iterator::Kind::kGetNeighbors);
   Result r = builder.build();
 
-  std::stringstream ss;
-  for (auto it = r.iter(); it->valid(); it->next()) {
-    ss << it->getEdge().getEdge().dst << ", ";
-  }
+  // std::stringstream ss;
+  // for (auto it = r.iter(); it->valid(); it->next()) {
+  //   ss << it->getEdge().getEdge().dst << ", ";
+  // }
 
-  auto res = buildRequestVids();
-  auto vids = std::move(res).value();
-  LOG(ERROR) << "execute: name=" << gn_->toString() << ", src=[" << vectorToString(vids)
-    << "], dst=[" << ss.str() << "]";
+  // auto res = buildRequestVids();
+  // auto vids = std::move(res).value();
+  // LOG(ERROR) << "execute: name=" << gn_->toString() << ", src=[" << vectorToString(vids)
+  //   << "], dst=[" << ss.str() << "]";
 
   return finish(std::move(r));
 }

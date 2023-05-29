@@ -81,7 +81,7 @@ class BFSShortestPathExecutor2 final : public Executor {
   folly::Future<Status> execute() override;
 
  private:
-  Status goOneStep(DirectionData& sideA, DirectionData& sideB, bool reverse, HashSet& meetVids);
+  Status goOneStep(DirectionData& sideA, DirectionData& sideB, HashSet& meetVids);
   bool tryMeet(DirectionData& sideA, DirectionData& sideB, const Value& dst, HashSet& meetVids);
 
   DataSet doConjunct(const std::vector<Value>& meetVids, bool oddStep) const;
